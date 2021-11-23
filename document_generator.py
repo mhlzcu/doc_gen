@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from typing import Union
 
 import numpy
@@ -57,7 +59,7 @@ class Box:
             char_size = draw.textsize(char, text.font)
             char_image = Image.new('RGB', char_size, color=background_color)
             draw_tool = ImageDraw.Draw(char_image)
-            draw_tool.text((0, 0), char, (0, 0, 0))
+            draw_tool.text((0, 0), char, (0, 0, 0), text.font)
             coords = (np.asarray(char_image.convert('L')) < 255).nonzero()
             if char_size[0] + offset_x >= (self.size[0] - 2 * indentation[0]):
                 offset_x = 0
@@ -86,7 +88,7 @@ class Document:
         elif isinstance(size, tuple):
             shape = size
         else:
-            raise 'Unexpected size data type!'
+            raise TypeError('Document size must be string with (a0,...,a5) or size in pixels.')
         self.shape = shape
         self.image = Image.new('RGB', self.shape, color=(200, 255, 255))
         self.objects = []
@@ -97,7 +99,7 @@ class Document:
             self.objects.append(box)
             self.image.paste(box.text_background, location)
         else:
-            raise 'Box is too large for the document.'
+            raise ValueError('Box size is larger then the document size.')
 
 
 def main():
@@ -107,11 +109,12 @@ def main():
     box1.add_text(text_b1)
     my_doc.add_box(box1, (10, 10))
     box2 = Box((100, 50), 'box2')
-    strings = 'Ahoj.'
+    strings = r'Мой распорядок дня.'
     text_b2 = Text(strings, ImageFont.truetype('./LITERPLA.ttf', 17))
     box2.add_text(text_b2)
     my_doc.add_box(box2, (80, 10))
     plt.imshow(my_doc.image)
+    plt.show()
 
 
 main()
