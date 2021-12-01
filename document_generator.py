@@ -31,11 +31,15 @@ class Object:
 
 class Text:
 
-    def __init__(self, text: str, font: PIL.ImageFont.FreeTypeFont, color: tuple = (0, 0, 0)):
+    def __init__(self, text: str, font: PIL.ImageFont.FreeTypeFont, color: tuple = (0, 0, 0), underline: bool = 0,
+                 underline_width: int = 3, underline_offset: int = 2):
         self.text = text
         self.font = font
         self.size = self.font.size
         self.color = color
+        self.underline = underline
+        self.underline_width = underline_width
+        self.underline_offset = underline_offset
         self.objects = []
         self.words = []
         self.words_bb = []
@@ -45,20 +49,19 @@ class Text:
 
 class Box:
 
-    def __init__(self, size: tuple, name: str = ''):
+    def __init__(self, size: tuple, name: str = '', background_color: tuple = (255, 255, 255)):
         self.size = size
         self.name = name
         self.text = []
-        self.image = []
-        self.text_background = []
+        self.image = Image.new('RGB', self.size, color=background_color)
         self.top_left_corner = (0, 0)
+        self.offset_x = 0
+        self.offset_y = 0
 
-    def add_text(self, text: Text, background_color: tuple = (255, 255, 255), indentation: int = (10, 10)) -> None:
-        self.text_background = Image.new('RGB', self.size, color=background_color)
-        draw = ImageDraw.Draw(self.text_background)
+    def add_text(self, text: Text,  indentation: int = (10, 10)) -> None:
+        draw = ImageDraw.Draw(self.image)
         self.text.append(text)
-        offset_x = 0
-        offset_y = 0
+        self.offset_x = 0
         word_coords = []
         line_coords = []
         new_line = 0
@@ -67,7 +70,7 @@ class Box:
             char_size_x, char_size_y = draw.textsize(char, text.font)
             char_offset = text.font.getoffset(char)
             if char != ' ':
-                char_image = Image.new('RGB', (char_size_x + 10, char_size_y + 10), color=background_color)
+                char_image = Image.new('RGB', (char_size_x + 10, char_size_y + 10), color=(255, 255, 255))
                 draw_tool = ImageDraw.Draw(char_image)
                 draw_tool.text((10, 10), char, (0, 0, 0), text.font)
                 coords = (np.asarray(char_image.convert('L')) < 255).nonzero()
@@ -78,12 +81,16 @@ class Box:
                 draw_tool.text((0, 0), char, (0, 0, 0), text.font)
                 coords = (np.asarray(char_image.convert('L')) == 0).nonzero()
 
-            if char_size_x + offset_x >= (self.size[0] - 2 * indentation[0]):
-                offset_x = 0
-                offset_y += char_size_y
+            if char_size_x + self.offset_x >= (self.size[0] - 2 * indentation[0]):
+                if text.underline:
+                    self.offset_y += char_size_y + text.underline_width + text.underline_offset
+                else:
+                    self.offset_y += char_size_y
+                self.offset_x = 0
+
                 new_line = 1
 
-            if char_size_y + offset_y >= (self.size[0] - 2 * indentation[0]):
+            if char_size_y + self.offset_y >= (self.size[0] - 2 * indentation[0]):
                 warnings.warn('Warning: Text too large for the box.')
                 if line_coords:
                     text.lines.append(line_coords)
@@ -91,9 +98,9 @@ class Box:
                     text.words.append(word_coords)
                 break
 
-            global_coords = (indentation[0] + coords[0] + offset_y, indentation[1] + coords[1] + offset_x)
-            draw.text((indentation[1] + offset_x, indentation[0] + offset_y), char, text.color, text.font)
-            offset_x += char_size_x
+            global_coords = (indentation[0] + coords[0] + self.offset_y, indentation[1] + coords[1] + self.offset_x)
+            draw.text((indentation[1] + self.offset_x, indentation[0] + self.offset_y), char, text.color, text.font)
+            self.offset_x += char_size_x
             # print(char)
             obj = Object(value=char, mask=global_coords)
 
@@ -121,6 +128,11 @@ class Box:
                     text.words.append(word_coords)
 
             text.objects.append(obj)
+
+        if text.underline:
+            self.offset_y += char_size_y + text.underline_width + text.underline_offset
+        else:
+            self.offset_y += char_size_y
 
         for word in text.words:
             coords = []
@@ -166,7 +178,10 @@ class Document:
         if all(x < y for x, y in zip(size_pos, self.shape)):
             box.top_left_corner = location
             self.boxes.append(box)
-            self.image.paste(box.text_background, location)
+            self.image.paste(box.image, location)
+            for idx, text in enumerate(box.text):
+                if text.underline:
+                    self.add_underline(len(self.boxes) - 1, idx)
         else:
             raise ValueError('Box size + location is larger then the document size.',
                              box.name, size_pos, 'vs.', self.shape)
@@ -196,15 +211,35 @@ class Document:
                     bb_list.append([tuple(map(operator.add, x, box.top_left_corner)) for x in bbox])
         return bb_list
 
+    def add_underline(self, box_id, text_id):
+        draw = ImageDraw.Draw(self.image)
+        for bbox in self.boxes[box_id].text[text_id].lines_bb:
+            (min_x, min_y), (max_x, _), (_, max_y), _ = \
+                ([tuple(map(operator.add, x, self.boxes[box_id].top_left_corner)) for x in bbox])
+            underline_y_offset = self.boxes[box_id].text[text_id].underline_offset
+            draw.line((min_x, max_y + underline_y_offset + 1,
+                       max_x, max_y + underline_y_offset + 1),
+                      fill=self.boxes[box_id].text[text_id].color,
+                      width=self.boxes[box_id].text[text_id].underline_width)
+
+
+
+
+
 def main():
     my_doc = Document('a4')
     box1 = Box((500, 500), 'box1')
-    text_b1 = Text('It\'s a beatifull day.', ImageFont.truetype('./comic.ttf', 100))
+    text_b1 = Text('It\'s a beatifull day.', ImageFont.truetype('./comic.ttf', 32), underline=1, underline_width=3,
+                   underline_offset=3)
+    text_b1_2 = Text('Protikorupční organizace Transparency International současně také sdělila,'
+                     'že Blažek by neměl být ministrem, protože by to budilo pochybnosti o ovlivňování vyšetřování'
+                     'zmíněných kauz.', ImageFont.truetype('./luckytw.ttf', 25))
     box1.add_text(text_b1)
+    box1.add_text(text_b1_2)
     my_doc.add_box(box1, (10, 10))
     box2 = Box((300, 300), 'box2')
     strings = r'Мой распорядок дня.'
-    text_b2 = Text(strings, ImageFont.truetype('./LITERPLA.ttf', 100))
+    text_b2 = Text(strings, ImageFont.truetype('./LITERPLA.ttf', 32), underline=True, underline_width=3)
     box2.add_text(text_b2)
     my_doc.add_box(box2, (10, 510))
     fig, ax = plt.subplots()
@@ -217,21 +252,21 @@ def main():
     plt.show()
 
     fig, ax = plt.subplots()
-    ax.imshow(box2.text_background)
+    ax.imshow(box2.image)
     for obj in box2.text[0].objects:
         poly = patches.Polygon(obj.bounding_box, linewidth=1, edgecolor='r', facecolor='none')
         ax.add_patch(poly)
     plt.show()
 
     fig, ax = plt.subplots()
-    ax.imshow(box1.text_background)
+    ax.imshow(box1.image)
     for bb in box1.text[0].words_bb:
         poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
         ax.add_patch(poly)
     plt.show()
 
     fig, ax = plt.subplots()
-    ax.imshow(box1.text_background)
+    ax.imshow(box1.image)
     for bb in box1.text[0].lines_bb:
         poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
         ax.add_patch(poly)
@@ -245,6 +280,7 @@ def main():
         ax.add_patch(poly)
     plt.show()
 
+    my_doc.image.show()
     a = 0
 
 
