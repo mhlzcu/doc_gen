@@ -55,14 +55,15 @@ class Augmentation:
 
     def __init__(self):
         self.fonts: list[PIL.ImageFont.FreeTypeFont] = []
-        self.augmentation_num: list[int] = []
-        self.characters: list[list[str]] = []
-        self.offsets: list[list[tuple(int, int)]] = []
-        self.noise_masks: list[np.ndarray] = []
+        self.augmentation_num: list[tuple[int, int]] = []
+        self.characters_offsets: list[list[str]] = []
+        self.offsets: list[list[tuple[int, int]]] = []
+        self.characters_masks: list[list[str]] = []
+        self.noise_masks: list[list[np.ndarray]] = []
 
     def add_fonts(self, fonts: list[PIL.ImageFont.FreeTypeFont],
                   texts: list[Text],
-                  offset_range: tuple = (-3, 3),
+                  offset_range: tuple = (-5, 5),
                   noise_octave: int = 8):
 
         for font in fonts:
@@ -72,17 +73,20 @@ class Augmentation:
                     chars += text.text.replace(" ", "")
 
             self.fonts.append(font)
-            aug_num = np.random.randint(1, 10)
-            self.augmentation_num.append(aug_num)
+            aug_num_noise = np.random.randint(1, 10)
+            aug_num_offset = np.random.randint(1, 10)
+            self.augmentation_num.append((aug_num_noise, aug_num_offset))
             offsets = []
             draw = ImageDraw.Draw(Image.new('RGB', (256, 256), color=(255, 255, 255)))
-            for i in range(self.augmentation_num[-1]):
-                offsets.append((np.random.randint(offset_range[0], np.random.randint(offset_range[1]))))
+            for i in range(aug_num_offset):
+                offsets.append((np.random.randint(offset_range[0], np.random.randint(offset_range[1])),
+                                np.random.randint(offset_range[0], np.random.randint(offset_range[1]))))
             self.offsets.append(offsets)
-            masks = []
             unique_chars = list(set(chars))
-            chars_to_aug = random.sample(unique_chars, aug_num)
-            self.characters.append(chars_to_aug)
+            self.characters_offsets.append(random.sample(unique_chars, aug_num_offset))
+            masks = []
+            chars_to_aug = random.sample(unique_chars, aug_num_noise)
+            self.characters_masks.append(chars_to_aug)
             for character in chars_to_aug:
                 np.random.seed()
                 char_size_x, char_size_y = draw.textsize(character, font)
@@ -131,8 +135,15 @@ class Box:
                 coords_glob = (coords[0] - 10, coords[1] - 10)
                 if text.font in augmentations.fonts:
                     font_id = augmentations.fonts.index(text.font)
-                    if char in augmentations.characters[font_id]:
-                        char_id = augmentations.characters[font_id].index(char)
+                    if char in augmentations.characters_offsets[font_id]:
+                        char_id = augmentations.characters_offsets[font_id].index(char)
+                        offset = augmentations.offsets[font_id][char_id]
+                        coords_glob = (coords_glob[0] + offset[0], coords_glob[1] + offset[1])
+
+                if text.font in augmentations.fonts:
+                    font_id = augmentations.fonts.index(text.font)
+                    if char in augmentations.characters_masks[font_id]:
+                        char_id = augmentations.characters_masks[font_id].index(char)
                         mask = augmentations.noise_masks[font_id][char_id]
                         char_mask = (np.asarray(char_image.convert('RGB')) == 255).astype(np.uint8) * 255
                         char_im = np.asarray(char_image.convert('RGB'))
