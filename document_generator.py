@@ -12,6 +12,39 @@ import yaml
 import operator
 import warnings
 from operator import itemgetter
+from perlin_numpy import generate_perlin_noise_2d
+
+
+class Augmentation:
+
+    def __init__(self):
+        self.fonts: list[PIL.ImageFont.FreeTypeFont] = []
+        self.augmentation_num: list[int] = []
+        self.characters: list[str] = []
+        self.offsets: list[list[tuple(int, int)]] = []
+        self.noise_masks: list[np.ndarray] = []
+
+    def add_font(self, font: PIL.ImageFont.FreeTypeFont, offset_range: tuple = (-3, 3),
+                 noise_octave: int = 8):
+        self.fonts.append(font)
+        self.augmentation_num.append(np.random.randint(1, 10))
+        offsets = []
+        draw = ImageDraw.Draw(Image.new('RGB', (256, 256), color=(255, 255, 255)))
+        for i in range(self.augmentation_num[-1]):
+            offsets.append((np.random.randint(offset_range[0], np.random.randint(offset_range[1]))))
+        self.offsets.append(offsets)
+        masks = []
+        for i in range(self.augmentation_num[-1]):
+            np.random.seed()
+            char_size_x, char_size_y = draw.textsize(' ', font)
+            if char_size_x % noise_octave:
+                char_size_x += noise_octave - (char_size_x % noise_octave)
+            if char_size_y % noise_octave:
+                char_size_y += noise_octave - (char_size_y % noise_octave)
+            noise = generate_perlin_noise_2d((char_size_y, char_size_x), (noise_octave, noise_octave))
+            masks.append(noise)
+        self.noise_masks.append(masks)
+
 
 class Object:
 
@@ -57,8 +90,9 @@ class Box:
         self.top_left_corner = (0, 0)
         self.offset_x = 0
         self.offset_y = 0
+        self.augmentations: Augmentation
 
-    def add_text(self, text: Text,  indentation: int = (10, 10)) -> None:
+    def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10)) -> None:
         draw = ImageDraw.Draw(self.image)
         self.text.append(text)
         self.offset_x = 0
@@ -168,10 +202,11 @@ class Document:
             shape = size
         else:
             raise TypeError('Document size must be string with (a0,...,a5) or size in pixels.')
-        self.shape = shape
-        self.image = Image.new('RGB', self.shape, color=(200, 255, 255))
-        self.boxes = []
-        self.background = np.zeros(shape)
+        self.shape: tuple[int, int] = shape
+        self.image: PIL.Image = Image.new('RGB', self.shape, color=(200, 255, 255))
+        self.boxes: list = []
+        self.background: np.ndarray = np.zeros(shape)
+        self.augmentations: Augmentation = Augmentation()
 
     def add_box(self, box: Box, location: tuple) -> None:
         size_pos = tuple(map(operator.add, box.size, location))
@@ -223,19 +258,22 @@ class Document:
                       width=self.boxes[box_id].text[text_id].underline_width)
 
 
-
-
-
 def main():
+
     my_doc = Document('a4')
+    augment = Augmentation()
     box1 = Box((500, 500), 'box1')
-    text_b1 = Text('It\'s a beatifull day.', ImageFont.truetype('./comic.ttf', 32), underline=1, underline_width=3,
+    font1 = ImageFont.truetype('./comic.ttf', 32)
+    text_b1 = Text('It\'s a beatifull day.', font1, underline=1, underline_width=3,
                    underline_offset=3)
+    font2 = ImageFont.truetype('./luckytw.ttf', 25)
     text_b1_2 = Text('Protikorupční organizace Transparency International současně také sdělila,'
                      'že Blažek by neměl být ministrem, protože by to budilo pochybnosti o ovlivňování vyšetřování'
-                     'zmíněných kauz.', ImageFont.truetype('./luckytw.ttf', 25))
-    box1.add_text(text_b1)
-    box1.add_text(text_b1_2)
+                     'zmíněných kauz.', font2)
+    augment.add_font(font1)
+    augment.add_font(font2)
+    box1.add_text(text_b1, augment)
+    box1.add_text(text_b1_2, augment)
     my_doc.add_box(box1, (10, 10))
     box2 = Box((300, 300), 'box2')
     strings = r'Мой распорядок дня.'
