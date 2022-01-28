@@ -19,9 +19,12 @@ import cv2
 
 class Object:
 
-    def __init__(self, value: str, mask: np.ndarray):
+    def __init__(self, value: str, mask: np.ndarray, local_coords: np.ndarray = np.zeros(1),
+                 augmented_mask: np.ndarray = np.zeros(1)):
         self.value = value
         self.mask = mask
+        self.augmented_image = augmented_mask
+        self.augmented_image_coords = local_coords
         self.bounding_box = []
         self.calculate_bbox()
 
@@ -63,7 +66,7 @@ class Augmentation:
 
     def add_fonts(self, fonts: list[PIL.ImageFont.FreeTypeFont],
                   texts: list[Text],
-                  offset_range: tuple = (-5, 5),
+                  offset_range: tuple = (-3, 3),
                   noise_octave: int = 8):
 
         for font in fonts:
@@ -85,9 +88,9 @@ class Augmentation:
             unique_chars = list(set(chars))
             self.characters_offsets.append(random.sample(unique_chars, aug_num_offset))
             masks = []
-            chars_to_aug = random.sample(unique_chars, aug_num_noise)
-            self.characters_masks.append(chars_to_aug)
-            for character in chars_to_aug:
+            # chars_to_aug = random.sample(unique_chars, aug_num_noise)
+            self.characters_masks.append(unique_chars)
+            for character in unique_chars:
                 np.random.seed()
                 char_size_x, char_size_y = draw.textsize(character, font)
                 char_size_x += 10
@@ -115,7 +118,8 @@ class Box:
         self.offset_y = 0
         self.augmentations: Augmentation
 
-    def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10)) -> None:
+    def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
+                 kern_gap: int = 0) -> None:
         draw = ImageDraw.Draw(self.image)
         self.text.append(text)
         self.offset_x = 0
@@ -148,6 +152,7 @@ class Box:
                         char_mask = (np.asarray(char_image.convert('RGB')) == 255).astype(np.uint8) * 255
                         char_im = np.asarray(char_image.convert('RGB'))
                         mask = np.dstack([(mask * 255).astype(int)]*3)
+                        # print(char)
                         im_aug = cv2.add(char_im, mask, dtype=0)
                         im_aug = cv2.bitwise_or(im_aug, char_mask)
             else:
@@ -173,17 +178,29 @@ class Box:
                     text.words.append(word_coords)
                 break
 
+            gap_x = 0
+            if idx > 0:
+                if self.offset_x > 0:
+                    prev_char = text.text[idx - 1]
+                    if char != ' ' or prev_char != ' ':
+                        prev_size_x, _ = draw.textsize(prev_char, text.font)
+                        kern_size_x, _ = draw.textsize(prev_char + char, text.font)
+                        # kern_image = Image.new('RGB', (kern_size_x + 10, kern_size_y + 10), color=(255, 255, 255))
+                        gap_x = kern_size_x - (char_size_x + prev_size_x) - kern_gap
+                    self.offset_x += gap_x
             global_coords = (indentation[0] + coords_glob[0] + self.offset_y,
                              indentation[1] + coords_glob[1] + self.offset_x)
             if im_aug.any():
                 pixels = self.image.load()
                 for glob, loc in zip(np.asarray(global_coords).T, np.asarray(coords).T):
                     pixels[tuple(glob[::-1])] = tuple(im_aug[tuple(loc)])
+                obj = Object(value=char, mask=global_coords, local_coords=coords, augmented_mask=im_aug)
             else:
                 draw.text((indentation[1] + self.offset_x, indentation[0] + self.offset_y), char, text.color, text.font)
+                obj = Object(value=char, mask=global_coords)
             self.offset_x += char_size_x
             # print(char)
-            obj = Object(value=char, mask=global_coords)
+            # obj = Object(value=char, mask=global_coords)
 
             if char != ' ':
                 if new_line:
@@ -250,7 +267,7 @@ class Document:
         else:
             raise TypeError('Document size must be string with (a0,...,a5) or size in pixels.')
         self.shape: tuple[int, int] = shape
-        self.image: PIL.Image = Image.new('RGB', self.shape, color=(200, 255, 255))
+        self.image: PIL.Image = Image.new('RGB', self.shape, color=(255, 255, 255))
         self.boxes: list = []
         self.background: np.ndarray = np.zeros(shape)
         self.augmentations: Augmentation = Augmentation()
@@ -304,88 +321,117 @@ class Document:
                       fill=self.boxes[box_id].text[text_id].color,
                       width=self.boxes[box_id].text[text_id].underline_width)
 
+    def add_background(self, background_image, blend_ratio=0.15):
+        image = cv2.cvtColor(background_image, cv2.COLOR_BGR2RGB)
+        new_image = Image.new('RGBA', self.shape, color=(255, 255, 255, 0))
+        back_image = Image.fromarray(image).convert("RGBA")
+        back_image = back_image.resize(self.image.size)
+        for box in self.boxes:
+            for text in box.text:
+                for obj in text.objects:
+                    if obj.augmented_image.any():
+                        pixels = new_image.load()
+                        for glob, loc in zip(np.asarray(obj.mask).T, np.asarray(obj.augmented_image_coords).T):
+                            glob_position = tuple(glob[::-1])
+                            pixels[tuple(map(operator.add, glob_position, box.top_left_corner))] = \
+                                tuple(obj.augmented_image[tuple(loc)]) + (127,)
+                    elif obj.value != ' ':
+                        for glob in np.asarray(obj.mask).T:
+                            glob_position = tuple(glob[::-1])
+                            pixels[tuple(map(operator.add, glob_position, box.top_left_corner))] = text.color + (127,)
+                a = 0
+
+        self.image = Image.alpha_composite(back_image, new_image)
+
+
+
+
+
+
 
 def main():
-    my_doc = Document('a4')
+    my_doc = Document((2020, 120), dpi=300)
 
     boxes = []
     texts = []
     fonts = []
 
-    box1 = Box((500, 500), 'box1')
-    box2 = Box((300, 300), 'box2')
+    box1 = Box((2000, 100), 'box1')
+    # box2 = Box((300, 300), 'box2')
 
     boxes.append(box1)
-    boxes.append(box2)
+    # boxes.append(box2)
 
-    font1 = ImageFont.truetype('./comic.ttf', 32)
-    font2 = ImageFont.truetype('./luckytw.ttf', 25)
-    font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
+    font1 = ImageFont.truetype('./luckytw.ttf', 40)
+    # font2 = ImageFont.truetype('./luckytw.ttf', 25)
+    # font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
 
     fonts.append(font1)
-    fonts.append(font2)
-    fonts.append(font3)
+    # fonts.append(font2)
+    # fonts.append(font3)
 
-    text_b1 = Text('It\'s a beatifull day.', font1, underline=1, underline_width=3,
-                   underline_offset=3, color=(255, 0, 0))
-    text_b1_2 = Text('Protikorupční organizace Transparency International současně také sdělila,'
-                     'že Blažek by neměl být ministrem, protože by to budilo pochybnosti o ovlivňování vyšetřování'
-                     'zmíněných kauz.', font2)
-    text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
+    # text_b1 = Text('It\'s a beatifull day.', font1, underline=1, underline_width=3,
+    #                underline_offset=3, color=(255, 0, 0))
+    text_b1_2 = Text('Protikorupční organizace Transparency International současně také sdělila, '
+                     'že Blažek by neměl být ministrem, protože by to budilo pochybnosti o ovlivňování vyšetřování '
+                     'zmíněných kauz.', font1)
+    # text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
 
-    texts.append(text_b1)
+    # texts.append(text_b1)
     texts.append(text_b1_2)
-    texts.append(text_b2)
+    # texts.append(text_b2)
 
     augment = Augmentation()
-    augment.add_fonts(fonts, texts)
+    # augment.add_fonts(fonts, texts)
 
-    box1.add_text(text_b1, augment)
+    # box1.add_text(text_b1, augment)
     box1.add_text(text_b1_2, augment)
-    box2.add_text(text_b2, augment)
+    # box2.add_text(text_b2, augment)
 
     my_doc.add_box(box1, (10, 10))
-    my_doc.add_box(box2, (10, 510))
+    # my_doc.add_box(box2, (10, 510))
 
+    # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
     fig, ax = plt.subplots()
     ax.imshow(my_doc.image)
-    bblist = my_doc.get_text_bounding_boxes()
-    for bbox in bblist:
-        poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(poly)
+    # bblist = my_doc.get_text_bounding_boxes()
+    # for bbox in bblist:
+    #     poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
+    #     ax.add_patch(poly)
     plt.savefig('test.png', dpi=300)
     plt.show()
 
-    fig, ax = plt.subplots()
-    ax.imshow(box2.image)
-    for obj in box2.text[0].objects:
-        poly = patches.Polygon(obj.bounding_box, linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(poly)
-    plt.show()
-
-    fig, ax = plt.subplots()
-    ax.imshow(box1.image)
-    for bb in box1.text[0].words_bb:
-        poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
-        ax.add_patch(poly)
-    plt.show()
-
-    fig, ax = plt.subplots()
-    ax.imshow(box1.image)
-    for bb in box1.text[0].lines_bb:
-        poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
-        ax.add_patch(poly)
-    plt.show()
-
-    bblist = my_doc.get_lines_bounding_boxes()
-    fig, ax = plt.subplots()
-    ax.imshow(my_doc.image)
-    for bbox in bblist:
-        poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(poly)
-    plt.show()
+    # fig, ax = plt.subplots()
+    # ax.imshow(box2.image)
+    # for obj in box2.text[0].objects:
+    #     poly = patches.Polygon(obj.bounding_box, linewidth=1, edgecolor='r', facecolor='none')
+    #     ax.add_patch(poly)
+    # plt.show()
+    #
+    # fig, ax = plt.subplots()
+    # ax.imshow(box1.image)
+    # for bb in box1.text[0].words_bb:
+    #     poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
+    #     ax.add_patch(poly)
+    # plt.show()
+    #
+    # fig, ax = plt.subplots()
+    # ax.imshow(box1.image)
+    # for bb in box1.text[0].lines_bb:
+    #     poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
+    #     ax.add_patch(poly)
+    # plt.show()
+    #
+    # bblist = my_doc.get_lines_bounding_boxes()
+    # fig, ax = plt.subplots()
+    # ax.imshow(my_doc.image)
+    # for bbox in bblist:
+    #     poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
+    #     ax.add_patch(poly)
+    # plt.show()
 
     my_doc.image.show()
+    my_doc.image.save('test_document.png')
     a = 0
 
 
