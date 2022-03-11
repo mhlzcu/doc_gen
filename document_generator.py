@@ -119,7 +119,7 @@ class Box:
         self.augmentations: Augmentation
 
     def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
-                 kern_gap: int = 0) -> None:
+                 kern_gap: int = 0, max_lines: int = 0, max_char_per_line: int = 0) -> None:
         draw = ImageDraw.Draw(self.image)
         self.text.append(text)
         self.offset_x = 0
@@ -127,6 +127,8 @@ class Box:
         line_coords = []
         new_line = 0
         # generate text char by char
+        char_count = 0
+        lines_count = 0
         for idx, char in enumerate(text.text):
             char_size_x, char_size_y = draw.textsize(char, text.font)
             char_offset = text.font.getoffset(char)
@@ -161,7 +163,10 @@ class Box:
                 draw_tool.text((0, 0), char, (0, 0, 0), text.font)
                 coords = (np.asarray(char_image.convert('L')) == 0).nonzero()
 
-            if char_size_x + self.offset_x >= (self.size[0] - 2 * indentation[0]):
+            char_count += 1
+
+            if (char_size_x + self.offset_x >= (self.size[0] - 2 * indentation[0]))\
+                    or char_count > max_char_per_line:
                 if text.underline:
                     self.offset_y += char_size_y + text.underline_width + text.underline_offset
                 else:
@@ -169,9 +174,11 @@ class Box:
                 self.offset_x = 0
 
                 new_line = 1
+                lines_count += 1
 
-            if char_size_y + self.offset_y >= (self.size[0] - 2 * indentation[0]):
-                warnings.warn('Warning: Text too large for the box.')
+            if (char_size_y + self.offset_y >= (self.size[1] - 2 * indentation[1]))\
+                    or lines_count == max_lines:
+                warnings.warn('Text too large for the box.')
                 if line_coords:
                     text.lines.append(line_coords)
                 if word_coords:
@@ -208,6 +215,7 @@ class Box:
                         text.lines.append(line_coords)
                     line_coords = [obj]
                     new_line = 0
+                    char_count = 1
                     if word_coords:
                         text.words.append(word_coords)
                     word_coords = [obj]
@@ -268,7 +276,7 @@ class Document:
             raise TypeError('Document size must be string with (a0,...,a5) or size in pixels.')
         self.shape: tuple[int, int] = shape
         self.image: PIL.Image = Image.new('RGB', self.shape, color=(255, 255, 255))
-        self.boxes: list = []
+        self.boxes: list[Box] = []
         self.background: np.ndarray = np.zeros(shape)
         self.augmentations: Augmentation = Augmentation()
 
@@ -284,6 +292,16 @@ class Document:
         else:
             raise ValueError('Box size + location is larger then the document size.',
                              box.name, size_pos, 'vs.', self.shape)
+
+    # def add_line_text_box(self, text: Text) -> None:
+    #     if self.boxes:
+    #         position = tuple(map(operator.add, self.boxes[-1].top_left_corner, (0, self.boxes[-1].size[1])))
+    #     else:
+    #         position = (0, 0)
+    #     size = text.font.getsize("0123456789")
+    #     box = Box((self.shape[0], size[1]), 'box' + str(len(self.boxes) + 1))
+    #     box.add_text(text)
+    #     self.add_box(box, position)
 
     def get_text_bounding_boxes(self) -> list:
         bb_list = []
@@ -350,13 +368,13 @@ class Document:
 
 
 def main():
-    my_doc = Document((2020, 120), dpi=300)
+    my_doc = Document((2020, 140), dpi=300)
 
     boxes = []
     texts = []
     fonts = []
 
-    box1 = Box((2000, 100), 'box1')
+    box1 = Box((2000, 120), 'box1')
     # box2 = Box((300, 300), 'box2')
 
     boxes.append(box1)
@@ -385,7 +403,7 @@ def main():
     # augment.add_fonts(fonts, texts)
 
     # box1.add_text(text_b1, augment)
-    box1.add_text(text_b1_2, augment)
+    box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=10)
     # box2.add_text(text_b2, augment)
 
     my_doc.add_box(box1, (10, 10))
