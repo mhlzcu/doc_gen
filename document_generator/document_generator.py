@@ -134,7 +134,7 @@ class Box:
             char_size_x, char_size_y = draw.textsize(char, text.font)
             char_offset = text.font.getoffset(char)
             im_aug = np.zeros(1)
-            print(f"Char: {char}")
+            # print(f"Char: {char}")
             if char != ' ':
                 char_image = Image.new('RGB', (char_size_x + 10, char_size_y + 10), color=(255, 255, 255))
                 draw_tool = ImageDraw.Draw(char_image)
@@ -366,13 +366,12 @@ class Document:
 
 def main(args):
 
-    out_dir = Path(args.output_dir)
-    out_images_dir = out_dir / 'lines'
+    out_images_dir = args.output_dir / 'lines'
     out_images_dir.mkdir(parents=True, exist_ok=True)
-    out_labels = out_dir / 'labels.txt'
+    out_labels = args.output_dir / 'labels.txt'
     labels = out_labels.open('w')
 
-    fonts = list(Path(args.fonts_dir).rglob('*.ttf'))
+    fonts = list(args.fonts_dir.rglob('*.ttf'))
     # font = ImageFont.truetype('./luckytw.ttf', 40)
     # font2 = ImageFont.truetype('./luckytw.ttf', 25)
     # font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
@@ -387,25 +386,36 @@ def main(args):
                 line = 'žluťoučký kůň úpěl ďábelské ódy'
                 text = Text(line.strip(), font)
 
-                my_doc = Document((consts.max_width, consts.height), dpi=300)
-                box1 = Box((consts.max_width - 1, consts.height - 1), 'box1')
+                my_doc = Document((5000, 500), dpi=300)
+                box = Box((consts.max_width, consts.height * 2), 'box')
 
                 augment = Augmentation()
                 # print(len(line.strip()))
-                print(line.strip())
-                box1.add_text(text, augment, max_lines=1, max_char_per_line=consts.max_characters, indentation=(0, 0))
+                # print(line.strip())
+                box_indentation = (10, 10)
+                box.add_text(text, augment, max_lines=1, max_char_per_line=consts.max_characters,
+                             indentation=box_indentation)
 
-                my_doc.add_box(box1, (0, 0))
+                my_doc.add_box(box, (10, 10))
 
                 # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
-                fig, ax = plt.subplots()
+                # fig, ax = plt.subplots()
                 # ax.imshow(my_doc.image)
                 #
                 # my_doc.image.show()
-                label = f'{index} {box1.text[0].text}\n'
-                labels.write(label)
-                my_doc.image.save(out_images_dir / f'{index}.png')
+                # TODO add indentation from line 395
+                bbox = my_doc.boxes[0].text[0].lines_bb[0]
+                min_x = bbox[0][0] + box_indentation[0]
+                max_x = bbox[1][0] + box_indentation[0]
+                min_y = bbox[0][1] + box_indentation[1]
+                max_y = bbox[2][1] + box_indentation[1]
+                img = np.array(my_doc.image)[min_y:max_y, min_x:max_x]
 
+                printed_text = my_doc.boxes[0].text[0].text
+                label = f'{index} {printed_text}\n'
+                labels.write(label)
+                # my_doc.image.save(out_images_dir / f'{index}.png')
+                cv2.imwrite(str(out_images_dir / f'{index}.png'), img)
                 index += 1
 
     labels.close()
@@ -415,9 +425,9 @@ def parse_args():
 
     parser = ArgumentParser()
 
-    parser.add_argument('--text_files', nargs='+', type=str, help='Path to input file/s with texts to generate')
-    parser.add_argument('--fonts_dir', type=str, help='Path to directory containing fonts in ttf format')
-    parser.add_argument('--output_dir', type=str, default='outputs', help='Path to directory to save outputs')
+    parser.add_argument('--text_files', nargs='+', type=Path, help='Path to input file/s with texts to generate')
+    parser.add_argument('--fonts_dir', type=Path, help='Path to directory containing fonts in ttf format')
+    parser.add_argument('--output_dir', type=Path, default='outputs', help='Path to directory to save outputs')
 
     return parser.parse_args()
 
