@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 
-from typing import Union, Tuple, Any, List
+from typing import Union, Tuple, List
 
 import numpy as np
 import PIL
 from PIL import Image, ImageDraw, ImageFont
-import matplotlib.pyplot as plt
 import operator
 import warnings
 from operator import itemgetter
@@ -14,6 +13,7 @@ import random
 import cv2
 from argparse import ArgumentParser
 from pathlib import Path
+from tqdm import tqdm
 
 import consts
 
@@ -370,6 +370,7 @@ def main(args):
     out_images_dir.mkdir(parents=True, exist_ok=True)
     out_labels = args.output_dir / 'labels.txt'
     labels = out_labels.open('w')
+    fonts_info = open(args.output_dir / 'font_info.txt', 'w')
 
     fonts = list(args.fonts_dir.rglob('*.ttf'))
     # font = ImageFont.truetype('./luckytw.ttf', 40)
@@ -380,10 +381,11 @@ def main(args):
     for text_file in args.text_files:
 
         with open(text_file, 'r') as in_file:
-            for line in in_file.readlines():
+            for line in tqdm(in_file.readlines()):
                 font_path = np.random.choice(fonts)
+                if 'koala' in str(font_path):
+                    continue
                 font = ImageFont.truetype(str(font_path), 40)
-                line = 'žluťoučký kůň úpěl ďábelské ódy'
                 text = Text(line.strip(), font)
 
                 my_doc = Document((5000, 500), dpi=300)
@@ -393,40 +395,54 @@ def main(args):
                 # print(len(line.strip()))
                 # print(line.strip())
                 box_indentation = (10, 10)
-                box.add_text(text, augment, max_lines=1, max_char_per_line=consts.max_characters,
-                             indentation=box_indentation)
+                try:
+                    box.add_text(text, augment, max_lines=1, max_char_per_line=consts.max_characters,
+                                 indentation=box_indentation)
+                except UnboundLocalError as ex:
+                    print(ex)
+                    print(f"Error in line: {line.strip()} with font: {font_path.name}")
+                    fonts_info.write(f"UnboundLocalError: {index}: {str(font_path)}\n")
+                    continue
+
+                except ValueError as err:
+                    print(err)
+                    print(f"Error in line: {line.strip()} with font: {font_path.name}")
+                    fonts_info.write(f"ValueError: {index}: {str(font_path)}\n")
+                    continue
 
                 my_doc.add_box(box, (10, 10))
-
                 # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
-                # fig, ax = plt.subplots()
-                # ax.imshow(my_doc.image)
-                #
-                # my_doc.image.show()
-                # TODO add indentation from line 395
+
+                margin = 5
                 bbox = my_doc.boxes[0].text[0].lines_bb[0]
-                min_x = bbox[0][0] + box_indentation[0]
-                max_x = bbox[1][0] + box_indentation[0]
-                min_y = bbox[0][1] + box_indentation[1]
-                max_y = bbox[2][1] + box_indentation[1]
+                min_x = bbox[0][0] + box_indentation[0] - margin
+                max_x = bbox[1][0] + box_indentation[0] + margin
+                min_y = bbox[0][1] + box_indentation[1] - margin
+                max_y = bbox[2][1] + box_indentation[1] + margin
                 img = np.array(my_doc.image)[min_y:max_y, min_x:max_x]
 
                 printed_text = my_doc.boxes[0].text[0].text
                 label = f'{index} {printed_text}\n'
                 labels.write(label)
+
                 # my_doc.image.save(out_images_dir / f'{index}.png')
                 cv2.imwrite(str(out_images_dir / f'{index}.png'), img)
+
+                fonts_info.write(f"{index}: {str(font_path)}\n")
                 index += 1
 
     labels.close()
+    fonts_info.close()
 
 
 def parse_args():
 
     parser = ArgumentParser()
 
-    parser.add_argument('--text_files', nargs='+', type=Path, help='Path to input file/s with texts to generate')
-    parser.add_argument('--fonts_dir', type=Path, help='Path to directory containing fonts in ttf format')
+    parser.add_argument('--text_files', required=True,
+                        nargs='+', type=Path, help='Path to input file/s with texts to generate')
+    parser.add_argument('--fonts_dir', required=True,
+                        type=Path, help='Path to directory containing fonts in ttf format')
     parser.add_argument('--output_dir', type=Path, default='outputs', help='Path to directory to save outputs')
 
     return parser.parse_args()
