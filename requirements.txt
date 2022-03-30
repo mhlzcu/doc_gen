@@ -1,13 +1,13 @@
-+cycler==0.11.0
-+fonttools==4.30.0
-+kiwisolver==1.4.0
-+matplotlib==3.5.1
-+numpy==1.22.3
-+opencv-python==4.5.5.64
-+packaging==21.3
-+perlin-numpy @ git+https://github.com/pvigier/perlin-numpy@6f077f811f5708e504732c26dee8f2015b95da0c
-+Pillow==9.0.1
-+pyparsing==3.0.7
-+python-dateutil==2.8.2
-+six==1.16.0
-+pandas==1.4.1
+cycler==0.11.0
+fonttools==4.30.0
+kiwisolver==1.4.0
+matplotlib==3.5.1
+numpy==1.22.3
+opencv-python==4.5.5.64
+packaging==21.3
+perlin-numpy @ git+https://github.com/pvigier/perlin-numpy@6f077f811f5708e504732c26dee8f2015b95da0c
+Pillow==9.0.1
+pyparsing==3.0.7
+python-dateutil==2.8.2
+six==1.16.0
+pandas==1.4.1
