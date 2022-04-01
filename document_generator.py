@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 
-from typing import Union, Tuple, Any
+from typing import Union, Tuple, List
 
-import numpy
 import numpy as np
 import PIL
 from PIL import Image, ImageDraw, ImageFont
-import matplotlib.pyplot as plt
-from matplotlib import patches
-import yaml
 import operator
 import warnings
 from operator import itemgetter
 from perlin_numpy import generate_perlin_noise_2d
 import random
 import cv2
+from argparse import ArgumentParser
+from pathlib import Path
+from tqdm import tqdm
+
+import consts
 
 
 class Object:
@@ -38,7 +39,7 @@ class Object:
 
 class Text:
 
-    def __init__(self, text: str, font: PIL.ImageFont.FreeTypeFont, color: tuple = (0, 0, 0), underline: bool = 0,
+    def __init__(self, text: str, font: PIL.ImageFont.FreeTypeFont, color: Tuple = (0, 0, 0), underline: bool = 0,
                  underline_width: int = 3, underline_offset: int = 2):
         self.text = text
         self.font = font
@@ -57,15 +58,15 @@ class Text:
 class Augmentation:
 
     def __init__(self):
-        self.fonts: list[PIL.ImageFont.FreeTypeFont] = []
-        self.augmentation_num: list[tuple[int, int]] = []
-        self.characters_offsets: list[list[str]] = []
-        self.offsets: list[list[tuple[int, int]]] = []
-        self.characters_masks: list[list[str]] = []
-        self.noise_masks: list[list[np.ndarray]] = []
+        self.fonts: List[PIL.ImageFont.FreeTypeFont] = []
+        self.augmentation_num: List[Tuple[int, int]] = []
+        self.characters_offsets: List[List[str]] = []
+        self.offsets: List[List[Tuple[int, int]]] = []
+        self.characters_masks: List[List[str]] = []
+        self.noise_masks: List[List[np.ndarray]] = []
 
-    def add_fonts(self, fonts: list[PIL.ImageFont.FreeTypeFont],
-                  texts: list[Text],
+    def add_fonts(self, fonts: List[PIL.ImageFont.FreeTypeFont],
+                  texts: List[Text],
                   offset_range: tuple = (-3, 3),
                   noise_octave: int = 8):
 
@@ -108,7 +109,7 @@ class Augmentation:
 
 class Box:
 
-    def __init__(self, size: tuple, name: str = '', background_color: tuple = (255, 255, 255)):
+    def __init__(self, size: Tuple, name: str = '', background_color: Tuple = (255, 255, 255)):
         self.size = size
         self.name = name
         self.text = []
@@ -118,7 +119,7 @@ class Box:
         self.offset_y = 0
         self.augmentations: Augmentation
 
-    def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
+    def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: Tuple[int, int] = (10, 10),
                  kern_gap: int = 0, max_lines: int = 0, max_char_per_line: int = 0) -> None:
         draw = ImageDraw.Draw(self.image)
         self.text.append(text)
@@ -133,6 +134,7 @@ class Box:
             char_size_x, char_size_y = draw.textsize(char, text.font)
             char_offset = text.font.getoffset(char)
             im_aug = np.zeros(1)
+            # print(f"Char: {char}")
             if char != ' ':
                 char_image = Image.new('RGB', (char_size_x + 10, char_size_y + 10), color=(255, 255, 255))
                 draw_tool = ImageDraw.Draw(char_image)
@@ -274,13 +276,13 @@ class Document:
             shape = size
         else:
             raise TypeError('Document size must be string with (a0,...,a5) or size in pixels.')
-        self.shape: tuple[int, int] = shape
+        self.shape: Tuple[int, int] = shape
         self.image: PIL.Image = Image.new('RGB', self.shape, color=(255, 255, 255))
-        self.boxes: list[Box] = []
+        self.boxes: List[Box] = []
         self.background: np.ndarray = np.zeros(shape)
         self.augmentations: Augmentation = Augmentation()
 
-    def add_box(self, box: Box, location: tuple) -> None:
+    def add_box(self, box: Box, location: Tuple) -> None:
         size_pos = tuple(map(operator.add, box.size, location))
         if all(x < y for x, y in zip(size_pos, self.shape)):
             box.top_left_corner = location
@@ -303,7 +305,7 @@ class Document:
     #     box.add_text(text)
     #     self.add_box(box, position)
 
-    def get_text_bounding_boxes(self) -> list:
+    def get_text_bounding_boxes(self) -> List:
         bb_list = []
         for box in self.boxes:
             for text in box.text:
@@ -312,7 +314,7 @@ class Document:
                     bb_list.append([tuple(map(operator.add, x, box.top_left_corner)) for x in bbox])
         return bb_list
 
-    def get_words_bounding_boxes(self) -> list:
+    def get_words_bounding_boxes(self) -> List:
         bb_list = []
         for box in self.boxes:
             for text in box.text:
@@ -320,7 +322,7 @@ class Document:
                     bb_list.append([tuple(map(operator.add, x, box.top_left_corner)) for x in bbox])
         return bb_list
 
-    def get_lines_bounding_boxes(self) -> list:
+    def get_lines_bounding_boxes(self) -> List:
         bb_list = []
         for box in self.boxes:
             for text in box.text:
@@ -362,93 +364,90 @@ class Document:
         self.image = Image.alpha_composite(back_image, new_image)
 
 
+def main(args):
 
+    out_images_dir = args.output_dir / 'lines'
+    out_images_dir.mkdir(parents=True, exist_ok=True)
+    out_labels = args.output_dir / 'labels.txt'
+    labels = out_labels.open('w')
+    fonts_info = open(args.output_dir / 'font_info.txt', 'w')
 
-
-
-
-def main():
-    my_doc = Document((2020, 140), dpi=300)
-
-    boxes = []
-    texts = []
-    fonts = []
-
-    box1 = Box((2000, 120), 'box1')
-    # box2 = Box((300, 300), 'box2')
-
-    boxes.append(box1)
-    # boxes.append(box2)
-
-    font1 = ImageFont.truetype('./koala.ttf', 40)
+    fonts = list(args.fonts_dir.rglob('*.ttf'))
+    # font = ImageFont.truetype('./luckytw.ttf', 40)
     # font2 = ImageFont.truetype('./luckytw.ttf', 25)
     # font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
 
-    fonts.append(font1)
-    # fonts.append(font2)
-    # fonts.append(font3)
+    index = 0
+    for text_file in args.text_files:
 
-    # text_b1 = Text('It\'s a beatifull day.', font1, underline=1, underline_width=3,
-    #                underline_offset=3, color=(255, 0, 0))
-    text_b1_2 = Text('Příliš žluťoučký kůň úpěl ďábelské kódy.', font1)
-    # text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
+        with open(text_file, 'r') as in_file:
+            for line in tqdm(in_file.readlines()):
+                font_path = np.random.choice(fonts)
+                if 'koala' in str(font_path):
+                    continue
+                font = ImageFont.truetype(str(font_path), 40)
+                text = Text(line.strip(), font)
 
-    # texts.append(text_b1)
-    texts.append(text_b1_2)
-    # texts.append(text_b2)
+                my_doc = Document((5000, 500), dpi=300)
+                box = Box((consts.max_width, consts.height * 2), 'box')
 
-    augment = Augmentation()
-    # augment.add_fonts(fonts, texts)
+                augment = Augmentation()
+                # print(len(line.strip()))
+                # print(line.strip())
+                box_indentation = (10, 10)
+                try:
+                    box.add_text(text, augment, max_lines=1, max_char_per_line=consts.max_characters,
+                                 indentation=box_indentation)
+                except UnboundLocalError as ex:
+                    print(ex)
+                    print(f"Error in line: {line.strip()} with font: {font_path.name}")
+                    fonts_info.write(f"UnboundLocalError: {index}: {str(font_path)}\n")
+                    continue
 
-    # box1.add_text(text_b1, augment)
-    box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=10)
-    # box2.add_text(text_b2, augment)
+                except ValueError as err:
+                    print(err)
+                    print(f"Error in line: {line.strip()} with font: {font_path.name}")
+                    fonts_info.write(f"ValueError: {index}: {str(font_path)}\n")
+                    continue
 
-    my_doc.add_box(box1, (10, 10))
-    # my_doc.add_box(box2, (10, 510))
+                my_doc.add_box(box, (10, 10))
+                # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
 
-    # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
-    fig, ax = plt.subplots()
-    ax.imshow(my_doc.image)
-    # bblist = my_doc.get_text_bounding_boxes()
-    # for bbox in bblist:
-    #     poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
-    #     ax.add_patch(poly)
-    plt.savefig('test.png', dpi=300)
-    plt.show()
+                margin = 5
+                bbox = my_doc.boxes[0].text[0].lines_bb[0]
+                min_x = bbox[0][0] + box_indentation[0] - margin
+                max_x = bbox[1][0] + box_indentation[0] + margin
+                min_y = bbox[0][1] + box_indentation[1] - margin
+                max_y = bbox[2][1] + box_indentation[1] + margin
+                img = np.array(my_doc.image)[min_y:max_y, min_x:max_x]
 
-    # fig, ax = plt.subplots()
-    # ax.imshow(box2.image)
-    # for obj in box2.text[0].objects:
-    #     poly = patches.Polygon(obj.bounding_box, linewidth=1, edgecolor='r', facecolor='none')
-    #     ax.add_patch(poly)
-    # plt.show()
-    #
-    # fig, ax = plt.subplots()
-    # ax.imshow(box1.image)
-    # for bb in box1.text[0].words_bb:
-    #     poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
-    #     ax.add_patch(poly)
-    # plt.show()
-    #
-    # fig, ax = plt.subplots()
-    # ax.imshow(box1.image)
-    # for bb in box1.text[0].lines_bb:
-    #     poly = patches.Polygon(bb, linewidth=1, edgecolor='g', facecolor='none')
-    #     ax.add_patch(poly)
-    # plt.show()
-    #
-    # bblist = my_doc.get_lines_bounding_boxes()
-    # fig, ax = plt.subplots()
-    # ax.imshow(my_doc.image)
-    # for bbox in bblist:
-    #     poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
-    #     ax.add_patch(poly)
-    # plt.show()
+                printed_text = my_doc.boxes[0].text[0].text
+                label = f'{index} {printed_text}\n'
+                labels.write(label)
 
-    my_doc.image.show()
-    my_doc.image.save('test_document.png')
-    a = 0
+                # my_doc.image.save(out_images_dir / f'{index}.png')
+                cv2.imwrite(str(out_images_dir / f'{index}.png'), img)
+
+                fonts_info.write(f"{index}: {str(font_path)}\n")
+                index += 1
+
+    labels.close()
+    fonts_info.close()
 
 
-main()
+def parse_args():
+
+    parser = ArgumentParser()
+
+    parser.add_argument('--text_files', required=True,
+                        nargs='+', type=Path, help='Path to input file/s with texts to generate')
+    parser.add_argument('--fonts_dir', required=True,
+                        type=Path, help='Path to directory containing fonts in ttf format')
+    parser.add_argument('--output_dir', type=Path, default='outputs', help='Path to directory to save outputs')
+
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    arguments = parse_args()
+    main(arguments)
