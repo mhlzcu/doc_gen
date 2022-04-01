@@ -380,7 +380,7 @@ def main():
     boxes.append(box1)
     # boxes.append(box2)
 
-    font1 = ImageFont.truetype('./luckytw.ttf', 40)
+    font1 = ImageFont.truetype('./koala.ttf', 40)
     # font2 = ImageFont.truetype('./luckytw.ttf', 25)
     # font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
 
@@ -390,9 +390,7 @@ def main():
 
     # text_b1 = Text('It\'s a beatifull day.', font1, underline=1, underline_width=3,
     #                underline_offset=3, color=(255, 0, 0))
-    text_b1_2 = Text('Protikorupční organizace Transparency International současně také sdělila, '
-                     'že Blažek by neměl být ministrem, protože by to budilo pochybnosti o ovlivňování vyšetřování '
-                     'zmíněných kauz.', font1)
+    text_b1_2 = Text('Příliš žluťoučký kůň úpěl ďábelské kódy.', font1)
     # text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
 
     # texts.append(text_b1)
