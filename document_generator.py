@@ -15,6 +15,8 @@ from operator import itemgetter
 from perlin_numpy import generate_perlin_noise_2d
 import random
 import cv2
+from kerning_pairs import OTFKernReader
+from fontTools.ttLib import TTFont
 
 
 class Object:
@@ -52,6 +54,9 @@ class Text:
         self.words_bb = []
         self.lines = []
         self.lines_bb = []
+        self.tt_font = TTFont(font.path)
+        kern_reader = OTFKernReader(font.path)
+        self.kern_table = kern_reader.kerningPairs
 
 
 class Augmentation:
@@ -106,6 +111,17 @@ class Augmentation:
             self.noise_masks.append(masks)
 
 
+def find_glyph_alias(character: chr, font: TTFont):
+    alias = []
+    for table in font['cmap'].tables:
+        if ord(character) in table.cmap.keys():
+            val = table.cmap[ord(character)]
+            if val not in alias:
+                alias = val
+                break
+    return alias
+
+
 class Box:
 
     def __init__(self, size: tuple, name: str = '', background_color: tuple = (255, 255, 255)):
@@ -119,7 +135,7 @@ class Box:
         self.augmentations: Augmentation
 
     def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
-                 kern_gap: int = 0, max_lines: int = 0, max_char_per_line: int = 0) -> None:
+                 kern_gap: int = 0, max_lines: int = 1000, max_char_per_line: int = 1000) -> None:
         draw = ImageDraw.Draw(self.image)
         self.text.append(text)
         self.offset_x = 0
@@ -134,7 +150,9 @@ class Box:
             char_offset = text.font.getoffset(char)
             im_aug = np.zeros(1)
             if char != ' ':
-                char_image = Image.new('RGB', (char_size_x + 10, char_size_y + 10), color=(255, 255, 255))
+                char_image = Image.new('RGB', (char_size_x + np.abs(char_offset[0]) + 10,
+                                               char_size_y + np.abs(char_offset[1]) + 10),
+                                       color=(255, 255, 255))
                 draw_tool = ImageDraw.Draw(char_image)
                 draw_tool.text((10, 10), char, text.color, text.font)
                 coords = (np.asarray(char_image.convert('L')) < 255).nonzero()
@@ -153,7 +171,7 @@ class Box:
                         mask = augmentations.noise_masks[font_id][char_id]
                         char_mask = (np.asarray(char_image.convert('RGB')) == 255).astype(np.uint8) * 255
                         char_im = np.asarray(char_image.convert('RGB'))
-                        mask = np.dstack([(mask * 255).astype(int)]*3)
+                        mask = np.dstack([(mask * 255).astype(int)] * 3)
                         # print(char)
                         im_aug = cv2.add(char_im, mask, dtype=0)
                         im_aug = cv2.bitwise_or(im_aug, char_mask)
@@ -165,7 +183,7 @@ class Box:
 
             char_count += 1
 
-            if (char_size_x + self.offset_x >= (self.size[0] - 2 * indentation[0]))\
+            if (char_size_x + self.offset_x >= (self.size[0] - 2 * indentation[0])) \
                     or char_count > max_char_per_line:
                 if text.underline:
                     self.offset_y += char_size_y + text.underline_width + text.underline_offset
@@ -176,7 +194,7 @@ class Box:
                 new_line = 1
                 lines_count += 1
 
-            if (char_size_y + self.offset_y >= (self.size[1] - 2 * indentation[1]))\
+            if (char_size_y + self.offset_y >= (self.size[1] - 2 * indentation[1])) \
                     or lines_count == max_lines:
                 warnings.warn('Text too large for the box.')
                 if line_coords:
@@ -186,15 +204,22 @@ class Box:
                 break
 
             gap_x = 0
-            if idx > 0:
-                if self.offset_x > 0:
-                    prev_char = text.text[idx - 1]
-                    if char != ' ' or prev_char != ' ':
-                        prev_size_x, _ = draw.textsize(prev_char, text.font)
-                        kern_size_x, _ = draw.textsize(prev_char + char, text.font)
-                        # kern_image = Image.new('RGB', (kern_size_x + 10, kern_size_y + 10), color=(255, 255, 255))
-                        gap_x = kern_size_x - (char_size_x + prev_size_x) - kern_gap
-                    self.offset_x += gap_x
+            # if idx > 0:
+            #     if self.offset_x > 0:
+            #         prev_char = text.text[idx - 1]
+            #
+            #         # kern = kern_table[u_alias, t_alias]
+            #         if char != ' ' or prev_char != ' ':
+            #             pchar_alias = find_glyph_alias(prev_char, text.tt_font)
+            #             char_alias = find_glyph_alias(char, text.tt_font)
+            #             if (pchar_alias, char_alias) in text.kern_table.keys():
+            #                 self.offset_x += text.kern_table[(pchar_alias, char_alias)]
+            #             else:
+            #                 cpl = draw.textlength(prev_char, text.font)
+            #                 cl = draw.textlength(char, text.font)
+            #                 ckl = draw.textlength(prev_char + char, text.font, features=['-kern'])
+            #                 cligl = draw.textlength(prev_char + char, text.font, features=['-dist'])
+            #                 self.offset_x += c
             global_coords = (indentation[0] + coords_glob[0] + self.offset_y,
                              indentation[1] + coords_glob[1] + self.offset_x)
             if im_aug.any():
@@ -205,7 +230,7 @@ class Box:
             else:
                 draw.text((indentation[1] + self.offset_x, indentation[0] + self.offset_y), char, text.color, text.font)
                 obj = Object(value=char, mask=global_coords)
-            self.offset_x += char_size_x
+            self.offset_x += draw.textlength(char, text.font)
             # print(char)
             # obj = Object(value=char, mask=global_coords)
 
@@ -362,47 +387,61 @@ class Document:
         self.image = Image.alpha_composite(back_image, new_image)
 
 
-
-
-
+def find_glyph_alias(character: chr, font: TTFont):
+    alias = []
+    for table in font['cmap'].tables:
+        if ord(character) in table.cmap.keys():
+            val = table.cmap[ord(character)]
+            if val not in alias:
+                alias = val
+                break
+    return alias
 
 
 def main():
-    my_doc = Document((2020, 140), dpi=300)
+    my_doc = Document((2020, 640), dpi=300)
 
     boxes = []
     texts = []
     fonts = []
 
-    box1 = Box((2000, 120), 'box1')
+    box1 = Box((2000, 520), 'box1')
     # box2 = Box((300, 300), 'box2')
 
     boxes.append(box1)
     # boxes.append(box2)
 
-    font1 = ImageFont.truetype('./koala.ttf', 40)
-    # font2 = ImageFont.truetype('./luckytw.ttf', 25)
-    # font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
+    font1 = ImageFont.truetype('./Finding_Beauty.ttf', 50)
+    font2 = ImageFont.truetype('./luckytw.ttf', 25)
+    font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
 
     fonts.append(font1)
+    # kern_reader = OTFKernReader('./Finding_Beauty.ttf')
+    # kern_table = kern_reader.kerningPairs
+    #
+    # tt_font = TTFont('./Finding_Beauty.ttf')
+    # u_alias = find_glyph_alias('u', tt_font)
+    # t_alias = find_glyph_alias('ť', tt_font)
+
+    # kern = kern_table[u_alias, t_alias]
     # fonts.append(font2)
     # fonts.append(font3)
 
-    # text_b1 = Text('It\'s a beatifull day.', font1, underline=1, underline_width=3,
-    #                underline_offset=3, color=(255, 0, 0))
-    text_b1_2 = Text('Příliš žluťoučký kůň úpěl ďábelské kódy.', font1)
-    # text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
+    text_b1 = Text('It\'s a beatifull day.', font2, underline=1, underline_width=3,
+                   underline_offset=3, color=(255, 0, 0))
+    text_b1_2 = Text('Příliš žluťoučký kůň úpěl ďábelské ódy', font1)
+    text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
 
-    # texts.append(text_b1)
-    texts.append(text_b1_2)
-    # texts.append(text_b2)
+    texts.append(text_b1)
+    # texts.append(text_b1_2)
+    texts.append(text_b2)
 
     augment = Augmentation()
     # augment.add_fonts(fonts, texts)
 
-    # box1.add_text(text_b1, augment)
-    box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=10)
-    # box2.add_text(text_b2, augment)
+    box1.add_text(text_b1, augment)
+    box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=100)
+    box1.add_text(text_b2, augment)
 
     my_doc.add_box(box1, (10, 10))
     # my_doc.add_box(box2, (10, 510))
@@ -438,13 +477,14 @@ def main():
     #     ax.add_patch(poly)
     # plt.show()
     #
-    # bblist = my_doc.get_lines_bounding_boxes()
-    # fig, ax = plt.subplots()
-    # ax.imshow(my_doc.image)
-    # for bbox in bblist:
-    #     poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
-    #     ax.add_patch(poly)
-    # plt.show()
+    bblist = my_doc.get_words_bounding_boxes()
+    fig, ax = plt.subplots()
+    ax.imshow(my_doc.image)
+    for bbox in bblist:
+        poly = patches.Polygon(bbox, linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_patch(poly)
+    plt.savefig('test_fig.png')
+    plt.show()
 
     my_doc.image.show()
     my_doc.image.save('test_document.png')
