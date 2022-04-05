@@ -145,18 +145,31 @@ class Box:
         # generate text char by char
         char_count = 0
         lines_count = 0
+        font_metrics = text.font.getmetrics()
+        if self.offset_y > 0:
+            self.offset_y += indentation[0]
         for idx, char in enumerate(text.text):
-            char_size_x, char_size_y = draw.textsize(char, text.font)
-            char_offset = text.font.getoffset(char)
+            # char_offset_x, char_offset_y = text.font.getoffset(char)
+            char_xtl, char_ytl, char_xbr, char_ybr = draw.textbbox((0, 0), char, text.font)
+            char_size_x = char_xbr - char_xtl
+            char_size_y = char_ybr - char_ytl
+            # char_offset_x = char_xtl
+            # char_offset_y = char_ytl
             im_aug = np.zeros(1)
             if char != ' ':
-                char_image = Image.new('RGB', (char_size_x + np.abs(char_offset[0]) + 10,
-                                               char_size_y + np.abs(char_offset[1]) + 10),
+                char_image = Image.new('RGB', (char_size_x + 10,
+                                               (font_metrics[0] + font_metrics[1]) + 10),
                                        color=(255, 255, 255))
                 draw_tool = ImageDraw.Draw(char_image)
-                draw_tool.text((10, 10), char, text.color, text.font)
+
+                top_left = (-char_xtl, 10)
+                # draw_tool.text((np.abs(char_offset[0]) + 5, 5 + np.abs(char_offset[1])), char, text.color, text.font)
+                draw_tool.text(top_left, char, text.color, text.font)
                 coords = (np.asarray(char_image.convert('L')) < 255).nonzero()
-                coords_glob = (coords[0] - 10, coords[1] - 10)
+                coords_glob_x = coords[1] + char_xtl
+                coords_glob_y = coords[0] - 10
+                coords_glob = (coords_glob_y, coords_glob_x)
+
                 if text.font in augmentations.fonts:
                     font_id = augmentations.fonts.index(text.font)
                     if char in augmentations.characters_offsets[font_id]:
@@ -176,7 +189,8 @@ class Box:
                         im_aug = cv2.add(char_im, mask, dtype=0)
                         im_aug = cv2.bitwise_or(im_aug, char_mask)
             else:
-                char_image = Image.new('RGB', (char_size_x, char_size_y))
+                # TODO: fix empty space bounding box
+                char_image = Image.new('RGB', (char_size_x, font_metrics[0] + font_metrics[1]))
                 draw_tool = ImageDraw.Draw(char_image)
                 draw_tool.text((0, 0), char, (0, 0, 0), text.font)
                 coords = (np.asarray(char_image.convert('L')) == 0).nonzero()
@@ -261,9 +275,9 @@ class Box:
             text.objects.append(obj)
 
         if text.underline:
-            self.offset_y += char_size_y + text.underline_width + text.underline_offset
+            self.offset_y += font_metrics[0] + font_metrics[1] + text.underline_width + text.underline_offset
         else:
-            self.offset_y += char_size_y
+            self.offset_y += font_metrics[0] + font_metrics[1]
 
         for word in text.words:
             coords = []
@@ -433,7 +447,7 @@ def main():
     text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
 
     texts.append(text_b1)
-    # texts.append(text_b1_2)
+    texts.append(text_b1_2)
     texts.append(text_b2)
 
     augment = Augmentation()
@@ -445,6 +459,14 @@ def main():
 
     my_doc.add_box(box1, (10, 10))
     # my_doc.add_box(box2, (10, 510))
+
+    implot = np.array(my_doc.image).copy()
+    bblist = my_doc.get_lines_bounding_boxes()
+    for bbox in bblist:
+        cv2.rectangle(implot, np.array(bbox[0]).astype(int), np.array(bbox[2]).astype(int), (0, 0, 255), 2)
+    cv2.imshow('image', implot)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
     fig, ax = plt.subplots()
