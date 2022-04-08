@@ -40,8 +40,8 @@ class Object:
 
 class Text:
 
-    def __init__(self, text: str, font: PIL.ImageFont.FreeTypeFont, color: tuple = (0, 0, 0), underline: bool = 0,
-                 underline_width: int = 3, underline_offset: int = 2):
+    def __init__(self, text: str, font: PIL.ImageFont.FreeTypeFont, color: tuple = (0, 0, 0, 255),
+                 underline: bool = 0, underline_width: int = 3, underline_offset: int = 2):
         self.text = text
         self.font = font
         self.size = self.font.size
@@ -76,6 +76,7 @@ class Augmentation:
 
         for font in fonts:
             chars: str = ''
+            font_metrics = font.getmetrics()
             for text in texts:
                 if text.font == font:
                     chars += text.text.replace(" ", "")
@@ -97,9 +98,9 @@ class Augmentation:
             self.characters_masks.append(unique_chars)
             for character in unique_chars:
                 np.random.seed()
-                char_size_x, char_size_y = draw.textsize(character, font)
-                char_size_x += 10
-                char_size_y += 10
+                char_xtl, char_ytl, char_xbr, char_ybr = draw.textbbox((0, 0), character, font)
+                char_size_x = char_xbr - char_xtl + 10
+                char_size_y = font_metrics[0] + font_metrics[1] + 10
                 mask_x, mask_y = (char_size_x, char_size_y)
                 if char_size_x % noise_octave:
                     mask_x += noise_octave - (char_size_x % noise_octave)
@@ -128,15 +129,20 @@ class Box:
         self.size = size
         self.name = name
         self.text = []
-        self.image = Image.new('RGB', self.size, color=background_color)
+        if background_color == (255, 255, 255):
+            self.image = Image.new('RGBA', self.size, color=(255, 255, 255, 0))
+        else:
+            self.image = Image.new('RGB', self.size, color=background_color).convert('RGBA')
+        self.image_text_only = Image.new('RGBA', self.size, color=(255, 255, 255, 0))
         self.top_left_corner = (0, 0)
         self.offset_x = 0
         self.offset_y = 0
         self.augmentations: Augmentation
 
     def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
-                 kern_gap: int = 0, max_lines: int = 1000, max_char_per_line: int = 1000) -> None:
-        draw = ImageDraw.Draw(self.image)
+                 kern_gap: int = 0, max_lines: int = 1000, max_char_per_line: int = 1000,
+                 blend_ratio: float = 0.5) -> None:
+        draw = ImageDraw.Draw(self.image_text_only)
         self.text.append(text)
         self.offset_x = 0
         word_coords = []
@@ -186,7 +192,7 @@ class Box:
                         char_im = np.asarray(char_image.convert('RGB'))
                         mask = np.dstack([(mask * 255).astype(int)] * 3)
                         # print(char)
-                        im_aug = cv2.add(char_im, mask, dtype=0)
+                        im_aug = cv2.add(np.array(char_im), mask, dtype=0)
                         im_aug = cv2.bitwise_or(im_aug, char_mask)
             else:
                 # TODO: fix empty space bounding box
@@ -237,9 +243,10 @@ class Box:
             global_coords = (indentation[0] + coords_glob[0] + self.offset_y,
                              indentation[1] + coords_glob[1] + self.offset_x)
             if im_aug.any():
-                pixels = self.image.load()
+                pixels = self.image_text_only.load()
                 for glob, loc in zip(np.asarray(global_coords).T, np.asarray(coords).T):
-                    pixels[tuple(glob[::-1])] = tuple(im_aug[tuple(loc)])
+                    # pixels[tuple(glob[::-1])] = tuple(im_aug[tuple(loc)]) + (im_aug[tuple(loc)][0],)
+                    pixels[tuple(glob[::-1])] = (0, 0, 0) + (255 - im_aug[tuple(loc)][0],)
                 obj = Object(value=char, mask=global_coords, local_coords=coords, augmented_mask=im_aug)
             else:
                 draw.text((indentation[1] + self.offset_x, indentation[0] + self.offset_y), char, text.color, text.font)
@@ -299,6 +306,9 @@ class Box:
             max_x = max(coords, key=itemgetter(0))[0]
             text.lines_bb.append([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
 
+        composite = Image.alpha_composite(self.image, self.image_text_only)
+        self.image = composite
+
 
 class Document:
 
@@ -314,7 +324,7 @@ class Document:
         else:
             raise TypeError('Document size must be string with (a0,...,a5) or size in pixels.')
         self.shape: tuple[int, int] = shape
-        self.image: PIL.Image = Image.new('RGB', self.shape, color=(255, 255, 255))
+        self.image: PIL.Image = Image.new('RGBA', self.shape, color=(255, 255, 255, 0))
         self.boxes: list[Box] = []
         self.background: np.ndarray = np.zeros(shape)
         self.augmentations: Augmentation = Augmentation()
@@ -324,7 +334,7 @@ class Document:
         if all(x < y for x, y in zip(size_pos, self.shape)):
             box.top_left_corner = location
             self.boxes.append(box)
-            self.image.paste(box.image, location)
+            self.image.paste(box.image, location, box.image)
             for idx, text in enumerate(box.text):
                 if text.underline:
                     self.add_underline(len(self.boxes) - 1, idx)
@@ -378,27 +388,12 @@ class Document:
                       fill=self.boxes[box_id].text[text_id].color,
                       width=self.boxes[box_id].text[text_id].underline_width)
 
-    def add_background(self, background_image, blend_ratio=0.15):
+    def add_background(self, background_image):
         image = cv2.cvtColor(background_image, cv2.COLOR_BGR2RGB)
-        new_image = Image.new('RGBA', self.shape, color=(255, 255, 255, 0))
         back_image = Image.fromarray(image).convert("RGBA")
         back_image = back_image.resize(self.image.size)
-        for box in self.boxes:
-            for text in box.text:
-                for obj in text.objects:
-                    if obj.augmented_image.any():
-                        pixels = new_image.load()
-                        for glob, loc in zip(np.asarray(obj.mask).T, np.asarray(obj.augmented_image_coords).T):
-                            glob_position = tuple(glob[::-1])
-                            pixels[tuple(map(operator.add, glob_position, box.top_left_corner))] = \
-                                tuple(obj.augmented_image[tuple(loc)]) + (127,)
-                    elif obj.value != ' ':
-                        for glob in np.asarray(obj.mask).T:
-                            glob_position = tuple(glob[::-1])
-                            pixels[tuple(map(operator.add, glob_position, box.top_left_corner))] = text.color + (127,)
-                a = 0
-
-        self.image = Image.alpha_composite(back_image, new_image)
+        composite = Image.alpha_composite(back_image, self.image)
+        self.image = composite
 
 
 def find_glyph_alias(character: chr, font: TTFont):
@@ -413,13 +408,13 @@ def find_glyph_alias(character: chr, font: TTFont):
 
 
 def main():
-    my_doc = Document((2020, 640), dpi=300)
+    my_doc = Document((1024, 1024), dpi=300)
 
     boxes = []
     texts = []
     fonts = []
 
-    box1 = Box((2000, 520), 'box1')
+    box1 = Box((1000, 1000), 'box1', )
     # box2 = Box((300, 300), 'box2')
 
     boxes.append(box1)
@@ -430,6 +425,7 @@ def main():
     font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
 
     fonts.append(font1)
+    fonts.append(font3)
     # kern_reader = OTFKernReader('./Finding_Beauty.ttf')
     # kern_table = kern_reader.kerningPairs
     #
@@ -451,7 +447,7 @@ def main():
     texts.append(text_b2)
 
     augment = Augmentation()
-    # augment.add_fonts(fonts, texts)
+    augment.add_fonts(fonts, texts)
 
     box1.add_text(text_b1, augment)
     box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=100)
@@ -468,7 +464,7 @@ def main():
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    # my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
+    my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
     fig, ax = plt.subplots()
     ax.imshow(my_doc.image)
     # bblist = my_doc.get_text_bounding_boxes()
