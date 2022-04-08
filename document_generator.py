@@ -144,7 +144,7 @@ class Box:
                  blend_ratio: float = 0.5) -> None:
         draw = ImageDraw.Draw(self.image_text_only)
         self.text.append(text)
-        self.offset_x = 0
+        self.offset_x = indentation[0]
         word_coords = []
         line_coords = []
         new_line = 0
@@ -195,26 +195,26 @@ class Box:
                         im_aug = cv2.add(np.array(char_im), mask, dtype=0)
                         im_aug = cv2.bitwise_or(im_aug, char_mask)
             else:
-                # TODO: fix empty space bounding box
                 char_image = Image.new('RGB', (char_size_x, font_metrics[0] + font_metrics[1]))
                 draw_tool = ImageDraw.Draw(char_image)
                 draw_tool.text((0, 0), char, (0, 0, 0), text.font)
                 coords = (np.asarray(char_image.convert('L')) == 0).nonzero()
+                coords_glob = coords
 
             char_count += 1
 
             if (char_size_x + self.offset_x >= (self.size[0] - 2 * indentation[0])) \
                     or char_count > max_char_per_line:
                 if text.underline:
-                    self.offset_y += char_size_y + text.underline_width + text.underline_offset
+                    self.offset_y += font_metrics[0] + font_metrics[1] + text.underline_width + text.underline_offset
                 else:
-                    self.offset_y += char_size_y
-                self.offset_x = 0
+                    self.offset_y += font_metrics[0] + font_metrics[1]
+                self.offset_x = indentation[0]
 
                 new_line = 1
                 lines_count += 1
 
-            if (char_size_y + self.offset_y >= (self.size[1] - 2 * indentation[1])) \
+            if (font_metrics[0] + font_metrics[1] + self.offset_y >= (self.size[1] - 2 * indentation[1])) \
                     or lines_count == max_lines:
                 warnings.warn('Text too large for the box.')
                 if line_coords:
@@ -422,9 +422,9 @@ def main():
 
     font1 = ImageFont.truetype('./Finding_Beauty.ttf', 50)
     font2 = ImageFont.truetype('./luckytw.ttf', 25)
-    font3 = ImageFont.truetype('./LITERPLA.ttf', 32)
+    font3 = ImageFont.truetype('./LITERPLA.ttf', 25)
 
-    fonts.append(font1)
+    # fonts.append(font1)
     fonts.append(font3)
     # kern_reader = OTFKernReader('./Finding_Beauty.ttf')
     # kern_table = kern_reader.kerningPairs
@@ -441,23 +441,61 @@ def main():
                    underline_offset=3, color=(255, 0, 0))
     text_b1_2 = Text('Příliš žluťoučký kůň úpěl ďábelské ódy', font1)
     text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
+    text_b2_2 = Text(r'Около 863 года братья Константин (Кирилл) Философ и Мефодий из Солуни (Салоники) по приказу'
+                     r' византийского императора Михаила III упорядочили письменность для старославянского языка и'
+                     r' использовали новую азбуку для перевода на славянский язык греческих религиозных текстов[6]:44.'
+                     r' Долгое время дискуссионным оставался вопрос, была ли это кириллица (и в таком случае глаголицу'
+                     r' считают тайнописью, появившейся после запрещения кириллицы) или глаголица — азбуки,'
+                     r' различающиеся почти исключительно начертанием. В настоящее время в науке преобладает'
+                     r' точка зрения, согласно которой глаголица первична, а кириллица вторична'
+                     r' (в кириллице глаголические буквы заменены на известные греческие).'
+                     r' Так, большинство учёных склонно считать, что глаголицу создал Константин (Кирилл) Философ,'
+                     r' а кириллицу — его ученик Климент Охридский, последовательно работавший в Плиске и Охриде в'
+                     r' Первом Болгарском царстве[7]. Глаголица длительное время в несколько изменённом виде'
+                     r' употреблялась у хорватов (до XIX в). Появление кириллицы, основанной на греческом уставном'
+                     r' (торжественном) письме — унциале[6]:45, связывают с деятельностью болгарской школы книжников'
+                     r' (после Кирилла и Мефодия). В частности, в житии св. Климента Охридского прямо пишется о'
+                     r' создании им славянской письменности уже после Кирилла и Мефодия. Г. А. Ильинский на основе'
+                     r' русской версии «Хроники патриарха Никифора» считал, что кириллица была создана в 864 году.'
+                     r' Возможно, кириллица была создана Климентом Охридским совместно с Наумом Охридским и'
+                     r' Константином (Кириллом) во время его нахождения в Плиске в 886—889 годах[8]. Благодаря'
+                     r' предыдущей деятельности братьев азбука получила широкое распространение в южнославянских'
+                     r' землях, что привело в 885 году к запрещению её использования в церковной службе римским папой,'
+                     r' боровшимся с результатами миссии Константина-Кирилла и Мефодия. В Болгарии при святом царе'
+                     r' Борисе, принявшем в 860 году христианство, создаётся первая славянская книжная школа —'
+                     r' Преславская книжная школа, — переписываются кирилло-мефодиевские оригиналы богослужебных'
+                     r' книг (Евангелие, Псалтирь, Апостол, церковные службы), делаются новые славянские переводы '
+                     r'с греческого языка, появляются оригинальные произведения на старославянском языке'
+                     r' («О письменехъ Чрьноризца Храбра»). Болгария становится центром распространения славянской'
+                     r' письменности. «Золотой век» распространения славянской письменности относится ко времени'
+                     r' царствования в Болгарии царя Симеона Великого (893—927 гг.), сына царя Бориса.'
+                     r' Позже старославянский язык проникает в Сербию, а в конце X века становится языком'
+                     r' церкви в Древней Руси. Старославянский язык, будучи языком церкви на Руси, испытывал на себе'
+                     r' влияние древнерусского языка. Это был старославянский язык русской редакции, так как включал'
+                     r' в себя элементы живой восточнославянской речи. Первоначально кириллицей пользовались'
+                     r' часть южных славян, восточные славяне, а также румыны (см. статью «румынская кириллица»);'
+                     r' со временем их алфавиты несколько разошлись друг от друга, хотя начертание букв и принципы'
+                     r' орфографии оставались (за исключением западносербского варианта, так называемой босанчицы)'
+                     r' в целом едиными.', font3)
 
-    texts.append(text_b1)
-    texts.append(text_b1_2)
-    texts.append(text_b2)
+    # texts.append(text_b1)
+    # texts.append(text_b1_2)
+    # texts.append(text_b2)
+    texts.append(text_b2_2)
 
     augment = Augmentation()
     augment.add_fonts(fonts, texts)
 
-    box1.add_text(text_b1, augment)
-    box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=100)
-    box1.add_text(text_b2, augment)
+    # box1.add_text(text_b1, augment)
+    # box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=100)
+    # box1.add_text(text_b2, augment)
+    box1.add_text(text_b2_2, augment)
 
     my_doc.add_box(box1, (10, 10))
     # my_doc.add_box(box2, (10, 510))
 
     implot = np.array(my_doc.image).copy()
-    bblist = my_doc.get_lines_bounding_boxes()
+    bblist = my_doc.get_text_bounding_boxes()
     for bbox in bblist:
         cv2.rectangle(implot, np.array(bbox[0]).astype(int), np.array(bbox[2]).astype(int), (0, 0, 255), 2)
     cv2.imshow('image', implot)
