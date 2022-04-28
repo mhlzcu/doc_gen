@@ -408,7 +408,7 @@ def find_glyph_alias(character: chr, font: TTFont):
 
 
 def main():
-    my_doc = Document((1024, 1024), dpi=300)
+    my_doc = Document((1024, 2024), dpi=300)
 
     boxes = []
     texts = []
