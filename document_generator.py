@@ -129,6 +129,7 @@ class Box:
         self.size = size
         self.name = name
         self.text = []
+        self.printed_text = []
         if background_color == (255, 255, 255):
             self.image = Image.new('RGBA', self.size, color=(255, 255, 255, 0))
         else:
@@ -280,6 +281,7 @@ class Box:
                     text.words.append(word_coords)
 
             text.objects.append(obj)
+            self.printed_text.append(obj.value)
 
         if text.underline:
             self.offset_y += font_metrics[0] + font_metrics[1] + text.underline_width + text.underline_offset
@@ -546,5 +548,6 @@ def main():
     my_doc.image.save('test_document.png')
     a = 0
 
+if __name__ == "__main__":
+    main()
 
-main()
