@@ -55,15 +55,16 @@ class Text:
         self.lines = []
         self.lines_bb = []
         self.tt_font = TTFont(font.path)
-        kern_reader = OTFKernReader(font.path)
-        self.kern_table = kern_reader.kerningPairs
+        # kern_reader = OTFKernReader(font.path)
+        # self.kern_table = kern_reader.kerningPairs
 
 
 class Augmentation:
 
     def __init__(self):
         self.fonts: list[PIL.ImageFont.FreeTypeFont] = []
-        self.augmentation_num: list[tuple[int, int]] = []
+        self.offset_num: list[int] = []
+        self.noise_num: list[int] = []
         self.characters_offsets: list[list[str]] = []
         self.offsets: list[list[tuple[int, int]]] = []
         self.characters_masks: list[list[str]] = []
@@ -71,6 +72,10 @@ class Augmentation:
 
     def add_fonts(self, fonts: list[PIL.ImageFont.FreeTypeFont],
                   texts: list[Text],
+                  add_noise: bool = True,
+                  add_offset: bool = True,
+                  offset_num: int = -1,
+                  noise_num: int = -1,
                   offset_range: tuple = (-3, 3),
                   noise_octave: int = 8):
 
@@ -80,36 +85,54 @@ class Augmentation:
             for text in texts:
                 if text.font == font:
                     chars += text.text.replace(" ", "")
-
-            self.fonts.append(font)
-            aug_num_noise = np.random.randint(1, 10)
-            aug_num_offset = np.random.randint(1, 10)
-            self.augmentation_num.append((aug_num_noise, aug_num_offset))
-            offsets = []
-            draw = ImageDraw.Draw(Image.new('RGB', (256, 256), color=(255, 255, 255)))
-            for i in range(aug_num_offset):
-                offsets.append((np.random.randint(offset_range[0], np.random.randint(offset_range[1])),
-                                np.random.randint(offset_range[0], np.random.randint(offset_range[1]))))
-            self.offsets.append(offsets)
             unique_chars = list(set(chars))
-            self.characters_offsets.append(random.sample(unique_chars, aug_num_offset))
-            masks = []
-            # chars_to_aug = random.sample(unique_chars, aug_num_noise)
-            self.characters_masks.append(unique_chars)
-            for character in unique_chars:
-                np.random.seed()
-                char_xtl, char_ytl, char_xbr, char_ybr = draw.textbbox((0, 0), character, font)
-                char_size_x = char_xbr - char_xtl + 10
-                char_size_y = font_metrics[0] + font_metrics[1] + 10
-                mask_x, mask_y = (char_size_x, char_size_y)
-                if char_size_x % noise_octave:
-                    mask_x += noise_octave - (char_size_x % noise_octave)
-                if char_size_y % noise_octave:
-                    mask_y += noise_octave - (char_size_y % noise_octave)
-                noise = generate_perlin_noise_2d((mask_y, mask_x), (noise_octave, noise_octave))
-                noise_mask = noise[0:char_size_y, 0: char_size_x]
-                masks.append(noise_mask)
-            self.noise_masks.append(masks)
+            self.fonts.append(font)
+            draw = ImageDraw.Draw(Image.new('RGB', (256, 256), color=(255, 255, 255)))
+
+            if add_noise:
+                if noise_num > 1:
+                    aug_num_noise = np.random.randint(1, noise_num)
+                elif noise_num == 0:
+                    aug_num_noise = 0
+                else:
+                    aug_num_noise = len(unique_chars)
+                self.noise_num.append(aug_num_noise)
+                masks = []
+                chars_to_aug = random.sample(unique_chars, aug_num_noise)
+                self.characters_masks.append(chars_to_aug)
+                for character in chars_to_aug:
+                    np.random.seed()
+                    char_xtl, char_ytl, char_xbr, char_ybr = draw.textbbox((0, 0), character, font)
+                    char_size_x = char_xbr - char_xtl + 10
+                    char_size_y = char_ybr + 10
+                    mask_x, mask_y = (char_size_x, char_size_y)
+                    if char_size_x % noise_octave:
+                        mask_x += noise_octave - (char_size_x % noise_octave)
+                    if char_size_y % noise_octave:
+                        mask_y += noise_octave - (char_size_y % noise_octave)
+                    noise = generate_perlin_noise_2d((mask_y, mask_x), (noise_octave, noise_octave))
+                    noise_mask = noise[0:char_size_y, 0: char_size_x]
+                    masks.append(noise_mask)
+                self.noise_masks.append(masks)
+            else:
+                self.noise_num.append(0)
+
+            if add_offset:
+                if offset_num > 1:
+                    aug_num_offset = np.random.randint(1, offset_num)
+                elif offset_num == 0:
+                    aug_num_offset = 0
+                else:
+                    aug_num_offset = len(unique_chars)
+                self.offset_num.append(aug_num_offset)
+                offsets = []
+                for i in range(aug_num_offset):
+                    offsets.append((np.random.randint(offset_range[0], np.random.randint(offset_range[1])),
+                                    np.random.randint(offset_range[0], np.random.randint(offset_range[1]))))
+                self.offsets.append(offsets)
+                self.characters_offsets.append(random.sample(unique_chars, aug_num_offset))
+            else:
+                self.offset_num.append(0)
 
 
 def find_glyph_alias(character: chr, font: TTFont):
@@ -142,7 +165,7 @@ class Box:
 
     def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
                  kern_gap: int = 0, max_lines: int = 1000, max_char_per_line: int = 1000,
-                 blend_ratio: float = 0.5) -> None:
+                 blend_ratio: float = 0.5, noise_percentage: float = 0.3) -> bool:
         draw = ImageDraw.Draw(self.image_text_only)
         self.text.append(text)
         self.offset_x = indentation[0]
@@ -151,7 +174,7 @@ class Box:
         new_line = 0
         # generate text char by char
         char_count = 0
-        lines_count = 0
+        lines_count = 1
         font_metrics = text.font.getmetrics()
         if self.offset_y > 0:
             self.offset_y += indentation[0]
@@ -165,36 +188,40 @@ class Box:
             im_aug = np.zeros(1)
             if char != ' ':
                 char_image = Image.new('RGB', (char_size_x + 10,
-                                               (font_metrics[0] + font_metrics[1]) + 10),
+                                               char_ybr + 10),
                                        color=(255, 255, 255))
                 draw_tool = ImageDraw.Draw(char_image)
 
-                top_left = (-char_xtl, 10)
+                top_left = (-char_xtl, 5)
                 # draw_tool.text((np.abs(char_offset[0]) + 5, 5 + np.abs(char_offset[1])), char, text.color, text.font)
                 draw_tool.text(top_left, char, text.color, text.font)
                 coords = (np.asarray(char_image.convert('L')) < 255).nonzero()
                 coords_glob_x = coords[1] + char_xtl
-                coords_glob_y = coords[0] - 10
+                coords_glob_y = coords[0] - 5
                 coords_glob = (coords_glob_y, coords_glob_x)
 
                 if text.font in augmentations.fonts:
                     font_id = augmentations.fonts.index(text.font)
-                    if char in augmentations.characters_offsets[font_id]:
-                        char_id = augmentations.characters_offsets[font_id].index(char)
-                        offset = augmentations.offsets[font_id][char_id]
-                        coords_glob = (coords_glob[0] + offset[0], coords_glob[1] + offset[1])
+                    if augmentations.offset_num[font_id] > 0:
+                        if char in augmentations.characters_offsets[font_id]:
+                            char_id = augmentations.characters_offsets[font_id].index(char)
+                            offset = augmentations.offsets[font_id][char_id]
+                            coords_glob = (coords_glob[0] + offset[0], coords_glob[1] + offset[1])
 
                 if text.font in augmentations.fonts:
                     font_id = augmentations.fonts.index(text.font)
-                    if char in augmentations.characters_masks[font_id]:
-                        char_id = augmentations.characters_masks[font_id].index(char)
-                        mask = augmentations.noise_masks[font_id][char_id]
-                        char_mask = (np.asarray(char_image.convert('RGB')) == 255).astype(np.uint8) * 255
-                        char_im = np.asarray(char_image.convert('RGB'))
-                        mask = np.dstack([(mask * 255).astype(int)] * 3)
-                        # print(char)
-                        im_aug = cv2.add(np.array(char_im), mask, dtype=0)
-                        im_aug = cv2.bitwise_or(im_aug, char_mask)
+                    if augmentations.noise_num[font_id] > 0:
+                        if char in augmentations.characters_masks[font_id]:
+                            char_id = augmentations.characters_masks[font_id].index(char)
+                            mask = augmentations.noise_masks[font_id][char_id]
+                            char_mask = (np.asarray(char_image.convert('RGB')) == 255).astype(np.uint8) * 255
+                            char_im = np.asarray(char_image.convert('RGB'))
+                            mask = np.dstack([(mask * noise_percentage * 255).astype(int)] * 3)
+                            # print(char)
+                            im_aug = cv2.add(np.array(char_im), mask, dtype=0, mask=255-char_mask[:, :, 0])
+                            # im_aug = cv2.add(np.array(char_im), mask, dtype=0)
+                            im_aug = cv2.bitwise_or(im_aug, char_mask)
+                            # im_aug = cv2.bitwise_or(im_aug, char_mask, mask=char_mask < 255)
             else:
                 char_image = Image.new('RGB', (char_size_x, font_metrics[0] + font_metrics[1]))
                 draw_tool = ImageDraw.Draw(char_image)
@@ -216,8 +243,12 @@ class Box:
                 lines_count += 1
 
             if (font_metrics[0] + font_metrics[1] + self.offset_y >= (self.size[1] - 2 * indentation[1])) \
-                    or lines_count == max_lines:
-                warnings.warn('Text too large for the box.')
+                    or lines_count > max_lines:
+                # print('Text too large for the box.')
+                # if lines_count > max_lines:
+                #     print('lines_count', lines_count, '>', 'max_lines', max_lines)
+                # if font_metrics[0] + font_metrics[1] + self.offset_y >= (self.size[1] - 2 * indentation[1]):
+                #     print(font_metrics[0] + font_metrics[1] + self.offset_y, (self.size[1] - 2 * indentation[1]))
                 if line_coords:
                     text.lines.append(line_coords)
                 if word_coords:
@@ -248,7 +279,7 @@ class Box:
                 for glob, loc in zip(np.asarray(global_coords).T, np.asarray(coords).T):
                     # pixels[tuple(glob[::-1])] = tuple(im_aug[tuple(loc)]) + (im_aug[tuple(loc)][0],)
                     pixels[tuple(glob[::-1])] = (0, 0, 0) + (255 - im_aug[tuple(loc)][0],)
-                obj = Object(value=char, mask=global_coords, local_coords=coords, augmented_mask=im_aug)
+                    obj = Object(value=char, mask=global_coords, local_coords=coords, augmented_mask=im_aug)
             else:
                 draw.text((indentation[1] + self.offset_x, indentation[0] + self.offset_y), char, text.color, text.font)
                 obj = Object(value=char, mask=global_coords)
@@ -293,7 +324,7 @@ class Box:
             for obj in word:
                 coords.extend(obj.bounding_box)
             min_y = min(coords, key=itemgetter(1))[1]
-            max_y = max(coords, key=itemgetter(1))[1]
+            max_y = max(coords, key=itemgetter(1))[1] + 2
             min_x = min(coords, key=itemgetter(0))[0]
             max_x = max(coords, key=itemgetter(0))[0]
             text.words_bb.append([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
@@ -303,13 +334,15 @@ class Box:
             for obj in line:
                 coords.extend(obj.bounding_box)
             min_y = min(coords, key=itemgetter(1))[1]
-            max_y = max(coords, key=itemgetter(1))[1]
+            max_y = max(coords, key=itemgetter(1))[1] + 2
             min_x = min(coords, key=itemgetter(0))[0]
             max_x = max(coords, key=itemgetter(0))[0]
             text.lines_bb.append([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
 
         composite = Image.alpha_composite(self.image, self.image_text_only)
         self.image = composite
+
+        return True
 
 
 class Document:
