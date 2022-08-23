@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-
+import os.path
 from typing import Union, Tuple, Any
+from pathlib import Path
 
 import numpy
 import numpy as np
@@ -166,6 +167,7 @@ class Box:
     def add_text(self, text: Text, augmentations: Augmentation = 0, indentation: int = (10, 10),
                  kern_gap: int = 0, max_lines: int = 1000, max_char_per_line: int = 1000,
                  blend_ratio: float = 0.5, noise_percentage: float = 0.3) -> bool:
+        printed = False
         draw = ImageDraw.Draw(self.image_text_only)
         self.text.append(text)
         self.offset_x = indentation[0]
@@ -280,9 +282,11 @@ class Box:
                     # pixels[tuple(glob[::-1])] = tuple(im_aug[tuple(loc)]) + (im_aug[tuple(loc)][0],)
                     pixels[tuple(glob[::-1])] = (0, 0, 0) + (255 - im_aug[tuple(loc)][0],)
                     obj = Object(value=char, mask=global_coords, local_coords=coords, augmented_mask=im_aug)
+                    printed = True
             else:
                 draw.text((indentation[1] + self.offset_x, indentation[0] + self.offset_y), char, text.color, text.font)
                 obj = Object(value=char, mask=global_coords)
+                printed = True
             self.offset_x += draw.textlength(char, text.font)
             # print(char)
             # obj = Object(value=char, mask=global_coords)
@@ -342,7 +346,7 @@ class Box:
         composite = Image.alpha_composite(self.image, self.image_text_only)
         self.image = composite
 
-        return True
+        return printed
 
 
 class Document:
@@ -386,6 +390,17 @@ class Document:
     #     box = Box((self.shape[0], size[1]), 'box' + str(len(self.boxes) + 1))
     #     box.add_text(text)
     #     self.add_box(box, position)
+    def get_pixel_locations(self) -> list:
+
+        pixels = []
+        for box in self.boxes:
+            for text in box.text:
+                for obj in text.objects:
+                    mask = obj.mask
+                    coords = list(zip(mask[0], mask[1]))
+                    pixels.append([tuple(map(operator.add, x, box.top_left_corner)) for x in coords])
+
+        return pixels
 
     def get_text_bounding_boxes(self) -> list:
         bb_list = []
@@ -455,12 +470,21 @@ def main():
     boxes.append(box1)
     # boxes.append(box2)
 
-    font1 = ImageFont.truetype('./Finding_Beauty.ttf', 50)
-    font2 = ImageFont.truetype('./luckytw.ttf', 25)
-    font3 = ImageFont.truetype('./LITERPLA.ttf', 25)
+    # font1 = ImageFont.truetype('./Finding_Beauty.ttf', 50)
+    # font2 = ImageFont.truetype('./luckytw.ttf', 25)
+    font1 = ImageFont.truetype(
+        r'c:\Users\Bigi\OneDrive - Západočeská univerzita v Plzni\Práce\NAKI3\paper22\fonts_ru\birchctt_[allfont.ru].ttf', 50)
+    font2 = ImageFont.truetype(
+        r'c:\Users\Bigi\OneDrive - Západočeská univerzita v Plzni\Práce\NAKI3\paper22\fonts_ru\decor_[allfont.ru].ttf', 50)
+    font3 = ImageFont.truetype(
+        r'c:\Users\Bigi\OneDrive - Západočeská univerzita v Plzni\Práce\NAKI3\paper22\fonts_ru\studioscriptctt_[allfont.ru].ttf', 50)
+    font4 = ImageFont.truetype(r'c:\Users\Bigi\OneDrive - Západočeská univerzita v Plzni\Práce\NAKI3\paper22\fonts_ru\Pecita.otf', 50)
 
     # fonts.append(font1)
+    fonts.append(font1)
+    fonts.append(font2)
     fonts.append(font3)
+    fonts.append(font4)
     # kern_reader = OTFKernReader('./Finding_Beauty.ttf')
     # kern_table = kern_reader.kerningPairs
     #
@@ -476,6 +500,10 @@ def main():
                    underline_offset=3, color=(255, 0, 0))
     text_b1_2 = Text('Příliš žluťoučký kůň úpěl ďábelské ódy', font1)
     text_b2 = Text(r'Мой распорядок дня.', font3, underline=True, underline_width=3)
+    textf1 = Text(r'Константин', font1)
+    textf2 = Text(r'Константин', font2)
+    textf3 = Text(r'Константин', font3)
+    textf4 = Text(r'Константин', font4)
     text_b2_2 = Text(r'Около 863 года братья Константин (Кирилл) Философ и Мефодий из Солуни (Салоники) по приказу'
                      r' византийского императора Михаила III упорядочили письменность для старославянского языка и'
                      r' использовали новую азбуку для перевода на славянский язык греческих религиозных текстов[6]:44.'
@@ -516,28 +544,52 @@ def main():
     # texts.append(text_b1)
     # texts.append(text_b1_2)
     # texts.append(text_b2)
-    texts.append(text_b2_2)
+    # texts.append(text_b2_2)
+    texts.append(textf1)
+    texts.append(textf2)
+    texts.append(textf3)
+    texts.append(textf4)
 
+    augment0 = Augmentation()
     augment = Augmentation()
-    augment.add_fonts(fonts, texts)
+    augment.add_fonts(fonts, texts, offset_range=(-2,2))
 
     # box1.add_text(text_b1, augment)
     # box1.add_text(text_b1_2, augment, max_lines=1, max_char_per_line=100)
     # box1.add_text(text_b2, augment)
-    box1.add_text(text_b2_2, augment)
-
+    box1.add_text(textf1, augment0)
+    box1.add_text(textf1, augment, noise_percentage=1.5)
+    box1.add_text(textf2, augment0)
+    box1.add_text(textf2, augment, noise_percentage=1.5)
+    box1.add_text(textf3, augment0)
+    box1.add_text(textf3, augment, noise_percentage=1.5)
+    box1.add_text(textf4, augment0)
+    box1.add_text(textf4, augment, noise_percentage=1.5)
     my_doc.add_box(box1, (10, 10))
     # my_doc.add_box(box2, (10, 510))
 
     implot = np.array(my_doc.image).copy()
-    bblist = my_doc.get_text_bounding_boxes()
-    for bbox in bblist:
-        cv2.rectangle(implot, np.array(bbox[0]).astype(int), np.array(bbox[2]).astype(int), (0, 0, 255), 2)
+    bblistc = my_doc.get_text_bounding_boxes()
+    bblistw = my_doc.get_words_bounding_boxes()
+    bblistl = my_doc.get_lines_bounding_boxes()
+    # for bbox in bblist:
+    #     cv2.rectangle(implot, np.array(bbox[0]).astype(int), np.array(bbox[2]).astype(int), (0, 0, 255), 2)
     cv2.imshow('image', implot)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    my_doc.add_background(cv2.imread(r'.\recycled-paper.jpg'))
+    my_doc.add_background(cv2.imread(r'd:\Work\naki\background\use\V_1945_BR_1_0009.jpg'))
+    pix_list = my_doc.get_pixel_locations()
+    implot = np.array(my_doc.image).copy()
+    # for char in pix_list[0:5]:
+    #     for pix in char:
+    #         implot[int(pix[0]), int(pix[1])] = [255, 0, 0, 255]
+    # bblist = [bblistc[7], bblistw[3], bblistl[2]]
+    # for bbox in bblist:
+    #     cv2.rectangle(implot, np.array(bbox[0]).astype(int), np.array(bbox[2]).astype(int), (255, 0, 0), 1)
+    cv2.imshow('image', cv2.cvtColor(implot, cv2.COLOR_RGBA2BGR))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     fig, ax = plt.subplots()
     ax.imshow(my_doc.image)
     # bblist = my_doc.get_text_bounding_boxes()
